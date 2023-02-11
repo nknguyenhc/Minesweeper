@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Minesweeper</title> 
+
+        <style>
+            #refresh {
+                background-color: rgb(153, 153, 248);
+                position: absolute;
+                top: 60px;
+            }
+            #refresh:hover {
+                background-color: rgb(63, 63, 243);
+                cursor: pointer;
+            }
+            #mines_marked {
+                background-color: orange;
+                position: absolute;
+                top: 60px;
+            }
+            #win_message {
+                height: 40px;
+                font-size: 30px;
+                color: red;
+                background-color: white;
+                border: none;
+                position: absolute;
+            }
+            .mine, .covered, .opened {
+                font-weight: bold;
+            }
+            #timer {
+                font-size: 25px;
+                position: absolute;
+                left: 50px;
+                top: 60px;
+            }
+            input {
+                width: 50px;
+            }
+            #inputs {
+                position: absolute;
+            }
+        </style>
+
+        <script>
+            let numOfRows = 20;
+            let numOfColumns = 24;
+            const minesToCellsRatio = 5 / 24; // ideal ratio of number of mines to total number of cells
+            let numOfMines = 100;
+            let timerID = 0;
+            let state = 'starting';
+            let minesLeftToBeAssigned = numOfMines;    // add mine to cells and subtract from this variable
+            let mines = [];
+            let minesMarked = 100;
+
+            // HTML sections, to be initiated later
+            let body = 0;
+            let rowNumSection = 0;
+            let colNumSection = 0;
+            let mineNumSection = 0;
+            let minesLeftSection = 0;
+            let winMessageSection = 0;
+            const cellWidth = 30;
+            const leftPadding = 40;
+            const topSpacing = 100;
+            
+            document.addEventListener('DOMContentLoaded', () => {
+                body = document.querySelector('#cells');
+
+                minesLeftSection = document.querySelector('#mines_marked');
+                minesLeftSection.innerHTML = 'Mines left: '.concat(minesMarked.toString());
+                minesLeftSection.style.left = (leftPadding + numOfColumns / 4 * cellWidth).toString().concat('px');
+
+                winMessageSection = document.querySelector('#win_message');
+                winMessageSection.style.top = (topSpacing + (numOfRows + 1) * cellWidth).toString().concat('px');
+                winMessageSection.style.left = (leftPadding + numOfColumns / 4 * cellWidth).toString().concat('px');
+
+                const inputs = document.querySelector('#inputs');
+                inputs.style.left = (leftPadding + numOfColumns * cellWidth).toString().concat('px');
+                inputs.style.top = '60px';
+
+                // set up the cells
+                setupCells(numOfRows, numOfColumns);
+                rowNumSection = document.querySelector('#row_num');
+                colNumSection = document.querySelector('#col_num');
+                mineNumSection = document.querySelector('#mine_num');
+                rowNumSection.addEventListener('change', () => {
+                    reset();
+                });
+                colNumSection.addEventListener('change', () => {
+                    reset();
+                });
+                mineNumSection.addEventListener('change', () => {
+                    reset();
+                })
+
+                // set up the position of the button restart
+                const refresh = document.querySelector('#refresh');
+                refresh.style.left = (leftPadding + numOfColumns / 2 * cellWidth).toString().concat('px');
+
+                // refresh the page when the button is clicked
+                refresh.addEventListener('click', () => {refreshGame();});
+
+                // add button listener
+                addCellEventListeners();
+            });
+
+
+            function setupCells(numOfRows, numOfColumns) {
+                cells = document.querySelector('#cells').childNodes;
+                const current_num_cell = cells.length;
+                for (let i = 0; i < current_num_cell; i++) {
+                    cells[0].remove();
+                }
+                for (let i = 0; i < numOfRows; i++) {
+                    for (let j = 0; j < numOfColumns; j++) {
+                        let cell = document.createElement('button');
+                        cell.type = 'button';
+                        cell.id = `cell_${i}_${j}`;
+
+                        // set up the CSS
+                        let top = topSpacing + cellWidth * i;
+                        let left = leftPadding + cellWidth * j;
+
+                        cell.style.height = cellWidth.toString().concat('px');
+                        cell.style.width = cellWidth.toString().concat('px');
+                        cell.style.backgroundColor = 'yellow';
+                        cell.style.padding = '3px';
+                        cell.style.margin = '3px';
+                        cell.style.position = 'absolute';
+                        cell.style.top = top.toString().concat('px');
+                        cell.style.left = left.toString().concat('px');
+                        body.append(cell);
+                    }
+                }
+            }
+
+            function reset() {
+                numOfRows = parseInt(rowNumSection.value);
+                numOfColumns = parseInt(colNumSection.value);
+                numOfMines = parseInt(mineNumSection.value);
+                if (numOfMines + 10 > numOfRows * numOfColumns) {
+                    numOfMines = Math.floor(numOfRows * numOfColumns * minesToCellsRatio);
+                    mineNumSection.value = numOfMines;
+                }
+                winMessageSection.style.top = (topSpacing + (numOfRows + 1) * cellWidth).toString().concat('px');
+                setupCells(numOfRows, numOfColumns);
+                addCellEventListeners();
+                refreshGame();
+            }
+
+            function surroundingCells(i, j) {
+                let cells = [];
+
+                function addElement(element) {
+                    if (element != null) {
+                        cells.push(element);
+                    }
+                }
+
+                addElement(document.querySelector(`#cell_${i - 1}_${j - 1}`));
+                addElement(document.querySelector(`#cell_${i - 1}_${j}`));
+                addElement(document.querySelector(`#cell_${i - 1}_${j + 1}`));
+                addElement(document.querySelector(`#cell_${i}_${j - 1}`));
+                addElement(document.querySelector(`#cell_${i}_${j + 1}`));
+                addElement(document.querySelector(`#cell_${i + 1}_${j - 1}`));
+                addElement(document.querySelector(`#cell_${i + 1}_${j}`));
+                addElement(document.querySelector(`#cell_${i + 1}_${j + 1}`));
+                return cells
+            }
+
+            function openCell(i, j, cell) {
+                cell.className = 'opened';
+                const adjacentCells = surroundingCells(i, j);
+                let minesCount = 0;
+                for (let k = 0; k < adjacentCells.length; k++) {
+                    let adjCell = adjacentCells[k];
+                    if (adjCell.className === 'mine') {
+                        minesCount += 1;
+                    }
+                }
+                cell.innerHTML = minesCount.toString();
+                cell.style.backgroundColor = 'grey';
+                formatCell(cell);
+                return minesCount
+            }
+
+            // auto expansion
+            function openCellAndExpand(i, j, cell) {
+                let minesCount = openCell(i, j, cell);
+                const adjacentCells = surroundingCells(i, j);
+                if (minesCount === 0) {
+                    for (let k = 0; k < adjacentCells.length; k++) {
+                        let adjCell = adjacentCells[k];
+                        // only open the adjacent cell when it is covered, to avoid infinite loop
+                        if (adjCell.className === 'covered') {
+                            let ind = 6;
+                            while (!Number.isNaN(parseInt(adjCell.id.slice(ind, ind + 1)))) {
+                                ind += 1;
+                            }
+                            let m = parseInt(adjCell.id.slice(5, ind));
+                            const nextInd = ind + 1;
+                            ind += 2;
+                            while (!Number.isNaN(parseInt(adjCell.id.slice(ind, ind + 1)))) {
+                                ind += 1;
+                            }
+                            let n = parseInt(adjCell.id.slice(nextInd, ind));
+                            openCellAndExpand(m, n, adjCell);
+                        }
+                    }
+                }
+            }
+
+            function formatCell(cell) {
+                if (cell.innerHTML === '0') {
+                    cell.innerHTML = '';
+                }
+                if (cell.innerHTML === '1') {
+                    cell.style.color = 'blue';
+                }
+                else if (cell.innerHTML === '2') {
+                    cell.style.color = 'rgb(4, 66, 4)';
+                }
+                else if (cell.innerHTML === '3') {
+                    cell.style.color = 'rgb(177, 4, 4)';
+                }
+                else if (cell.innerHTML === '4') {
+                    cell.style.color = 'purple';
+                }
+                else if (cell.innerHTML === '5') {
+                    cell.style.color = 'rgb(151, 99, 1)'
+                }
+                else if (cell.innerHTML === '6') {
+                    cell.style.color = 'rgb(2, 88, 88)';
+                }
+                else if (cell.innerHTML === '7') {
+                    cell.style.color = 'rgb(105, 35, 35)';
+                }
+            }
+
+            let time = 0;
+            function add_time() {
+                time += 1
+                document.querySelector('#timer').innerHTML = time.toString();
+            }
+
+            function refreshGame() {
+                let cells = document.querySelector('#cells').childNodes;
+                for (let i = 0; i < cells.length; i++) {
+                    cells[i].innerHTML = '';
+                    cells[i].style.backgroundColor = 'yellow';
+                    cells[i].style.color = 'black';
+                }
+                document.querySelector('#mines_marked').innerHTML = `Mines left: ${numOfMines}`;
+                document.querySelector('#win_message').innerHTML = '';
+                document.querySelector('#timer').innerHTML = '0';
+                clearInterval(timerID);
+                state = 'starting';
+                time = 0;
+                minesLeftToBeAssigned = numOfMines;
+                mines = [];
+                minesMarked = numOfMines;
+            }
+
+            function addCellEventListeners() {
+                for (let i = 0; i < numOfRows; i++) {
+                    for (let j = 0; j < numOfColumns; j++) {
+                        let cell = document.querySelector(`#cell_${i}_${j}`);
+
+                        // open the cell
+                        cell.addEventListener('click', () => {
+                            
+                            // set up after the first move
+                            if (state === 'starting') {
+                                // set up mines
+                                for (let i_ = 0; i_ < numOfRows; i_++) {
+                                    for (let j_ = 0; j_ < numOfColumns; j_++) {
+                                        let cell_ = document.querySelector(`#cell_${i_}_${j_}`);
+                                        if (Math.abs(i - i_) > 1 || Math.abs(j - j_) > 1) {
+                                            let probOfContainingMine = Math.random();
+                                            if (probOfContainingMine < minesLeftToBeAssigned / (numOfRows * numOfColumns - i_ * numOfColumns - j_)) {
+                                                cell_.className = 'mine';
+                                                minesLeftToBeAssigned -= 1;
+                                                mines.push(cell_);
+                                            }
+                                            else {
+                                                cell_.className = 'covered';
+                                            }
+                                        }
+                                        else {
+                                            cell_.className = 'covered';
+                                        }
+                                    }
+                                }
+                                openCellAndExpand(i, j, cell);
+                                state = 'playing';
+
+                                // set up the timer
+                                timerID = setInterval(add_time, 1000);
+                            }
+
+                            // open the cell during the game
+                            else if (state === 'playing' && cell.innerHTML != 'S') {
+                                if (cell.className === 'mine') {
+                                    for (let k = 0; k < mines.length; k++) {
+                                        if (mines[k].innerHTML != 'S') {
+                                            mines[k].innerHTML = 'M';
+                                            mines[k].style.backgroundColor = 'red';
+                                        }
+                                        state = 'lost';
+                                        clearInterval(timerID);
+                                    }
+
+                                    // show wrong marks
+                                    let coveredCells = document.querySelectorAll('.covered');
+                                    for (let i = 0; i < coveredCells.length; i++) {
+                                        if (coveredCells[i].innerHTML === 'S') {
+                                            coveredCells[i].style.color = 'red';
+                                        }
+                                    }
+                                }
+                                else if (cell.className === 'covered') {
+                                    openCellAndExpand(i, j, cell);
+                                    let covered = document.querySelectorAll('.covered').length;
+                                    if (covered === 0) {
+                                        state = 'won';
+                                        winMessageSection.innerHTML = 'You won, congratulations!';
+                                        clearInterval(timerID);
+                                    }
+                                }
+                            }
+                        });
+
+                        // mark the cell as mine
+                        cell.addEventListener('contextmenu', (e) => {
+                            e.preventDefault();
+                            if (state === 'playing') {
+                                if (cell.innerHTML != '') {
+                                    if (cell.innerHTML === 'S') {
+                                        cell.style.backgroundColor = 'yellow';
+                                        cell.innerHTML = '';
+                                        minesMarked += 1;
+                                        minesLeftSection.innerHTML = 'Mines left: '.concat(minesMarked.toString());
+                                    }
+                                }
+                                else {
+                                    cell.style.backgroundColor = 'orange';
+                                    cell.innerHTML = 'S';
+                                    minesMarked -= 1;
+                                    minesLeftSection.innerHTML = 'Mines left: '.concat(minesMarked.toString());
+                                }
+                            }
+                        })
+                    }
+                }
+            }
+        </script>
+    </head>
+
+    <body>
+        <div id='cells'></div>
+        <button type='button' id='refresh'>Restart</button>
+        <div id='mines_marked'>Mines left: </div>
+        <button id='win_message'></button>
+        <div id='timer'>0</div>
+        <text id='inputs'>
+            <input type='number' step='1' min='4' id='row_num' value='20'><text> &#215 </text><input type='number' step='1' min='4' id='col_num' value='24'>
+            <text>Number of mines: </text><input type='number' step='1' min='4' id='mine_num' value='100'>
+        </text>
+    </body>
+</html>
